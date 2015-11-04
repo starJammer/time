@@ -4,6 +4,11 @@ import (
 	ti "time"
 )
 
+func init() {
+	myClock = normalClock{}
+	referenceTime = Time{ti.Now()}
+}
+
 /******************\
 	Completed
 \******************/
@@ -54,13 +59,13 @@ func Date(year int, month Month, day, hour, min, sec, nsec int, loc *Location) T
 			min,
 			sec,
 			nsec,
-			loc.Location,
+			loc.l,
 		),
 	}
 }
 
 type Location struct {
-	*ti.Location
+	l *ti.Location
 }
 
 func FixedZone(name string, offset int) *Location {
@@ -76,29 +81,61 @@ func LoadLocation(name string) (*Location, error) {
 	Todo
 \******************/
 
-var myClock clock
+var (
+	myClock       clock
+	referenceTime Time
+)
 
 type clock interface {
 	after(d Duration) <-chan Time
 	sleep(d Duration)
 	tick(d Duration) <-chan Time
 	now() Time
+	//init is called right after the clock is switched
+	init()
+	//cleanup is called before the clock is switched
+	//out for another one
 	cleanup()
+	//timeSwitch notifies the clock of the reference time changing
+	timeSwitch()
 }
 
 func switchClock(c clock) {
+
 	if myClock != nil {
 		myClock.cleanup()
 	}
+
+	myClock = c
+	myClock.init()
+}
+
+//setReferenceTime sets the reference time to be
+//used by the distorted clocks. If you use the normal
+//clock this won't have any effect
+func SetReferenceTime(t Time) {
+	referenceTime = t
+	myClock.timeSwitch()
+}
+
+func ReferenceTime() Time {
+	return referenceTime
 }
 
 func After(d Duration) <-chan Time {
-
-	return nil
+	return myClock.after(d)
 }
 
 func Sleep(d Duration) {
+	myClock.sleep(d)
+}
 
+func Now() Time {
+	return myClock.now()
+}
+
+func Tick(d Duration) <-chan Time {
+	return myClock.tick(d)
 }
 
 func ParseDuration(s string) (Duration, error) {
@@ -116,7 +153,7 @@ func Parse(layout, value string) (Time, error) {
 }
 
 func ParseInLocation(layout, value string, loc *Location) (Time, error) {
-	t, err := ti.ParseInLocation(layout, value, loc.Location)
+	t, err := ti.ParseInLocation(layout, value, loc.l)
 	return Time{t}, err
 }
 
@@ -125,7 +162,7 @@ func Unix(sec int64, nsec int64) Time {
 }
 
 type Duration struct {
-	ti.Duration
+	d ti.Duration
 }
 
 type Ticker struct {
@@ -141,83 +178,68 @@ func (*Ticker) Stop() {
 
 }
 
-//SetReferenceTime sets the time of reference for the package.
-//Use this when you want your entire system to think that it
-//is a very specific time.
-//Any go process that are sleeping might be awakened
-//if the time they expected to wake up is less than the
-//new reference time seti.
-func SetReferenceTime(t ti.Time) {
-
-}
-
-func Tick(d Duration) <-chan Time {
-
-	return nil
-}
-
 type ParseError struct {
 	*ti.ParseError
 }
 
 type Time struct {
-	ti.Time
+	t ti.Time
 }
 
 func (t Time) Add(d Duration) Time {
-	return Time{t.Time.Add(d.Duration)}
+	return Time{t.t.Add(d.d)}
 }
 
 func (t Time) AddDate(years int, months int, days int) Time {
-	return Time{t.Time.AddDate(years, months, days)}
+	return Time{t.t.AddDate(years, months, days)}
 }
 
 func (t Time) After(u Time) bool {
-	return t.Time.After(u.Time)
+	return t.t.After(u.t)
 }
 
 func (t Time) Before(u Time) bool {
-	return t.Time.Before(u.Time)
+	return t.t.Before(u.t)
 }
 
 func (t Time) Equal(u Time) bool {
-	return t.Time.Equal(u.Time)
+	return t.t.Equal(u.t)
 }
 
 func (t Time) In(loc *Location) Time {
-	return Time{t.Time.In(loc.Location)}
+	return Time{t.t.In(loc.l)}
 }
 
 func (t Time) Local() Time {
-	return Time{t.Time.Local()}
+	return Time{t.t.Local()}
 }
 
 func (t Time) Location() *Location {
-	return &Location{t.Time.Location()}
+	return &Location{t.t.Location()}
 }
 
 func (t Time) Month() Month {
-	return Month(t.Time.Month())
+	return Month(t.t.Month())
 }
 
 func (t Time) Round(d Duration) Time {
-	return Time{t.Time.Round(d.Duration)}
+	return Time{t.t.Round(d.d)}
 }
 
 func (t Time) Sub(u Time) Duration {
-	return Duration{t.Time.Sub(u.Time)}
+	return Duration{t.t.Sub(u.t)}
 }
 
 func (t Time) Truncate(d Duration) Time {
-	return Time{t.Time.Truncate(d.Duration)}
+	return Time{t.t.Truncate(d.d)}
 }
 
 func (t Time) UTC() Time {
-	return Time{t.Time.UTC()}
+	return Time{t.t.UTC()}
 }
 
 func (t Time) Weekday() Weekday {
-	return Weekday(t.Time.Weekday())
+	return Weekday(t.t.Weekday())
 }
 
 type Weekday int
@@ -244,12 +266,3 @@ var days = [...]string{
 
 // String returns the English name of the day ("Sunday", "Monday", ...).
 func (d Weekday) String() string { return days[d] }
-
-func Now() Time {
-
-	return Time{}
-}
-
-type Ticker interface {
-	Stop()
-}
